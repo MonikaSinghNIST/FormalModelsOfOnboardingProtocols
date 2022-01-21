@@ -1,0 +1,195 @@
+role configurator(C, E : agent,
+	   Mx, Nx, Lx: symmetric_key,  
+           H : hash_func,
+           Bi, Pi, Kca: public_key,  %% Kca is the public key of a T3P (ie. CA)
+           SND, RCV: channel (dy))
+played_by C
+def=
+
+   local Ni, Nc, Nr, Ne, Sid, Pa, PMS: text,
+	 Channellist, Capi, Capr, Pver: text,
+	 K1,K2: hash(text.text.symmetric_key),
+	 Bk: hash(text.text.symmetric_key.symmetric_key.symmetric_key),
+	 Ke: hash(hash(text.text.symmetric_key.symmetric_key.symmetric_key).text.nat),
+         State: nat,
+         Br, Pr: public_key,
+         M: hash(text.text.text),
+	 Configreq,Configpayrol,Sendconnstatus : text,
+	 Iauth : hash(text.text.public_key.public_key.public_key.public_key.nat),
+	 Rauth : hash(text.text.public_key.public_key.public_key.public_key.nat)
+
+   const sec_k1, sec_iauth, auth_ni, auth_nr : protocol_id,
+	 chirp  : text,
+	 first_intermediate_key, second_intermediate_key, dpp_status : text,
+	 salt : text,
+	 len : nat
+
+   init  State := 1
+
+   transition
+
+   1.  State = 1
+       /\ RCV(H(chirp.Br'))
+       =|>
+       State' := 3
+	/\ Ni':= new()
+	/\ Channellist' := new()
+	/\ Capi' := new()
+	/\ Pver':= new()	
+	/\ K1' := H(salt.first_intermediate_key.Mx)
+	/\ SND(H(Br).H(Bi).Pi.Pver'.Channellist'.{Ni'.Capi'}_K1')
+        /\ secret(K1,sec_k1,{C,E})
+	/\ witness(C,E,auth_ni,Ni)
+
+  3.  State = 3
+	/\ RCV(H(Br').H(Bi').Pr'.Pver'.{Nr'.Ni'.Capr'.{Rauth'}_K2'}_Ke')
+	/\ Rauth'=H(Ni'.Nr'.Pi.Pr.Bi.Br.0)
+	/\ K2' = H(salt.second_intermediate_key.Nx)
+	/\ Ke' = H(H(Ni.Nr.Mx.Nx.Lx).dpp_status.len)
+	=|>
+	State' := 5
+	/\ Iauth' := H(Nr.Ni.Pr.Pi.Br.Bi.1)
+	/\ SND(H(Br).H(Bi).{Iauth'}_Ke')
+	/\ secret(Iauth,sec_iauth,{C,E})
+	/\ request(C,E,auth_nr,Nr)
+  5.  State = 5
+	/\ RCV({Ne'.Configreq'}_Ke')
+	=|> 
+	State' :=7
+	/\ Configpayrol' := new()
+	/\ Sendconnstatus' := new()
+	/\ SND({Ne'.Configpayrol'.Sendconnstatus'}_Ke)
+  7.  State = 7
+	/\ RCV({Ne'}_Ke')
+	=|> State':=9
+       
+
+
+
+end role
+
+
+
+role enrollee(C, E : agent,
+	 Mx, Nx, Lx: symmetric_key,
+         H : hash_func,
+         Br, Pr, Kca: public_key,
+         SND, RCV: channel (dy))
+played_by E
+def=
+
+   local Ni, Nr, Na, Nb, Ne, Sid, Pa, PMS: text,
+	 Channellist, Capi, Capr, Pver: text, 
+	 K1, K2: hash(text.text.symmetric_key),
+	 Bk: hash(text.text.symmetric_key.symmetric_key.symmetric_key),
+	 Ke: hash(hash(text.text.symmetric_key.symmetric_key.symmetric_key).text.nat),
+         State: nat,
+	 Bi, Pi : public_key,
+	 Configreq, Configpayrol, Sendconnstatus : text,
+	 Iauth : hash(text.text.public_key.public_key.public_key.public_key.nat),
+	 Rauth : hash(text.text.public_key.public_key.public_key.public_key.nat)
+
+   const sec_nr, sec_k2, sec_rauth, sec_ne, auth_ni, auth_nr : protocol_id,
+	 chirp  : text, 
+	 first_intermediate_key, second_intermediate_key, dpp_status : text,
+	 salt : text,
+	 len : nat
+
+   init  State := 0
+
+   transition
+
+   0.  State = 0 /\ RCV(start)
+       =|>
+       State' := 2
+       %/\ Chirp' := 'Chirping'
+       /\ SND(H(chirp.Br))
+   2. State = 2 /\ RCV(H(Br').H(Bi').Pi'.Pver'.Channellist'.{Ni'.Capi'}_K1')
+	/\ K1' = H(salt.first_intermediate_key.Mx)
+	=|> 
+	State' := 4
+	/\ Nr' := new() 
+	/\ Capr' := new()
+	/\ Rauth' :=H(Ni'.Nr'.Pi.Pr.Bi.Br.0)
+	/\ K2' := H(salt.second_intermediate_key.Nx)
+	/\ Bk' := H(Ni.Nr.Mx.Nx.Lx)
+	/\ Ke' := H(H(Ni.Nr.Mx.Nx.Lx).dpp_status.len)
+	/\ SND(H(Br).H(Bi').Pr.Pver'.{Nr'.Ni'.Capr'.{Rauth'}_K2'}_Ke')	
+	%/\ secret(Nr,sec_nr,{E,C})
+	/\ secret(K2,sec_k2,{E,C})
+	/\ witness(E,C,auth_nr,Nr)
+        %/\ request(E,C,auth_ni,Ni)
+		
+  4.  State = 4 /\ RCV(H(Br').H(Bi').{Iauth'}_Ke')
+	/\ Iauth' = H(Nr.Ni.Pr.Pi.Br.Bi.1)
+	=|>
+	State' := 6
+	/\ Ne' := new()
+	/\ Configreq' := new()
+	/\ SND ({Ne'.Configreq'}_Ke)
+	/\ secret(Ne,sec_ne,{E,C})
+       /\ request(E,C,auth_ni,Ni)
+	
+
+  6.  State = 6 /\ RCV({Ne'.Configpayrol'.Sendconnstatus'}_Ke')
+	=|>
+	State' := 8
+	/\ SND({Ne}_Ke)
+	
+       
+
+
+end role
+
+
+
+role session(C,E: agent,
+	     Mx, Nx, Lx: symmetric_key,
+             H : hash_func,
+             Bi, Pi, Br, Pr, Kca: public_key)
+def=
+
+   local  SC, SR, RC, RR: channel (dy)
+
+   composition
+
+
+                configurator(C,E,Mx,Nx,Lx,H,Bi,Pi,Kca,SC,RC)
+              /\    enrollee(C,E,Mx,Nx,Lx,H,Br,Pr,Kca,SR,RR)
+
+end role
+
+
+
+role environment()
+def=
+
+   const na_nb1, na_nb2      : protocol_id,
+         c, e                : agent,
+	 mx, nx, lx: symmetric_key,
+         h     : hash_func,
+         bi, pi, br, pr, kca, ki, kib, kip : public_key
+
+   intruder_knowledge = { c, e, bi, pi, br, pr, kca, ki, kib, kip, inv(ki), inv(kib), inv(kip),
+                          {i.ki}_(inv(kca)) }  
+
+   composition
+        session(c,e,mx,nx,lx,h,bi,pi,br,pr,kca)
+   %/\  session(i,e,mx,nx,lx,h,kib,kip,br,pr,kca)
+   %/\  session(c,i,mx,nx,lx,h,bi,pi,kib,kip,kca)
+
+end role
+
+
+
+goal
+
+  secrecy_of sec_k1, sec_k2, sec_iauth, sec_ne  % Addresses G7
+  authentication_on auth_ni, auth_nr  % Addresses G1, G2, G3, G7, G10
+  authentication_on na_nb2  % Addresses G1, G2, G3, G7, G10
+
+end goal
+
+
+
+environment()
