@@ -1,0 +1,208 @@
+(**
+Device Provisioning Protocol (DPP-I) is a Wi-Fi Alliance specification and also known
+as 'Wi-Fi CERTIFIED Easy Connect™'. The protocol aims to provide a user-friendly way
+to provision diverse IoT devices to secure Wi-Fi securely. DPP refers the new
+out-of-the-box device as Enrollee. A logical entity that configures the enrollee
+to the secure Wi-Fi is called Configurator . It could be an application on a device.
+DPP uses four sub-protocols and works in the following phases:
+1. Bootstrapping: The enrollee announces its presence by sending its Bootstrapping-public
+   key (and some metadata) to the configurator using an out-of-the-band mechanism. It can
+   be done by scanning a QR code, an NFC tap, or a bluetooth exchange.
+2. Authentication Protocol: DPP defines two roles 'Initiator' and 'Responder'. Either
+   configurator or enrollee can act as initiator and initiate the authentication phase.
+   We have considered configurator as an initiator for implementation purposes in this paper.
+   Both configurator and enrollee have two public-private key pairs: bootstrapping and protocol
+   keys. In this phase configurator and enrollee perform an ECDH (Elliptic-curve Diffie–Hellman)
+   handshake using the public-private key pairs to establish a common secret session key. After
+   receiving the enrollee's presence announcement configurator initiates the authentication by
+   sending a DPP-authentication-request encrypted by an ephemeral intermediate ECDH key. The
+   authentication request contains a nonce. The enrollee returns the nonce as part of its DPP-
+   authentication-response and proves that it possess the private key corresponding to the
+   bootstrapping public received by the configurator in bootstrapping phase. After receiving the
+   correct nonce, the configurator sends a DPP- authentication-confirm message and authenticates
+   the enrollee.
+3. Configuration Protocol: Once the enrollee is authenticated, it sends a DPP configuration request
+  (requesting configurator for its configuration information) encrypted by the session key. The
+  configurator responds with the configuration credential in the form of a configuration object
+  secured by the session key. The configuration object could be a passphrase, password, or a DPP
+  connector. In our implementations, the DPP connector has been taken as the configuration object.
+	DPP connector is basically a certificate from the configurator, containing the public-protocol
+  key of the enrollee signed by the configurator. Using this, the enrollee can connect to the
+  network and the other devices on the network.
+
+  **)
+
+set preciseActions = true.
+set traceDisplay=long.
+free c:channel.
+(*************private channels***************)
+free ChannelC:channel[private].
+free ChannelE:channel[private].
+
+
+type nonce.
+type host.
+type userid.
+(* Symmetric key encryption *)
+type key.
+fun senc(bitstring, key): bitstring.
+reduc forall m: bitstring, k: key; sdec(senc(m,k),k) = m.
+
+
+fun encpt(bitstring,bitstring): bitstring.
+
+(* Asymmetric key *)
+type skey.
+type pkey.
+fun pk(skey): pkey.
+fun aenc(bitstring, pkey): bitstring.
+reduc forall m: bitstring, sk: skey; adec(aenc(m,pk(sk)),sk) = m.
+
+(* Digital signatures *)
+type sskey.
+type spkey.
+type eskey.(*Elliptic key*)
+type epkey.(*Elliptic key*)
+fun spk(sskey): spkey.
+
+fun sign(bitstring, skey): bitstring.
+
+reduc forall m: bitstring, sk: skey; getmess(sign(m,sk)) = m.
+reduc forall m: bitstring, sk: skey; checksign(sign(m,sk),pk(sk)) = m.
+fun PRF(bitstring): key.
+reduc forall h:host,np:nonce,ns:nonce,ms:key;
+KeyGen(h,np,ns,ms)=PRF((h,ms,np,ns)).
+fun HSH(bitstring): bitstring.
+fun H(epkey): bitstring.
+(*New functions from here for DPP*)
+fun concat(bitstring, epkey): bitstring.
+fun concatstr(bitstring, bitstring): bitstring.
+fun concatstrs(nonce, nonce, epkey, epkey, epkey, bitstring): bitstring.
+fun concatnonce(nonce, nonce): bitstring.
+fun sha256(bitstring): bitstring.
+
+
+fun epk(eskey): epkey.
+fun ecDfHm(eskey,epkey):bitstring.
+equation forall sx: eskey, sy: eskey ; ecDfHm(sx,epk(sy))=ecDfHm(sy,epk(sx)) .
+fun HKDF(bitstring,bitstring): key.
+fun HKDFextract(bitstring,bitstring): bitstring.
+fun HKDFextractkey(bitstring,bitstring): key.
+
+const first_ikey_const:bitstring[data].
+const second_ikey_const:bitstring[data].
+const chirp:bitstring.
+const cnst0:bitstring.
+const cnst1:bitstring.
+const dppkylen:bitstring.
+const uid:userid.
+const ClientK_secr:bitstring [private].
+const ServerK_secr:bitstring [private].
+const ServerK_m_secr:bitstring [private].
+const ClientK_m_secr:bitstring [private].
+
+
+free hostC,hostE:host.
+free Sn,Issuer:bitstring.
+free keScrt,ke2Scrt,keempl1Scrt,keempl2Scrt:bitstring[private].
+free configobjectScrt:bitstring[private].
+
+
+event acceptConfigEnrolleeKey1(key). (*Authentication*)
+event termEnrollee1(key). (*Authentication*)
+event acceptConfigEnrolleeKey2(key). (*Authentication*)
+event termEnrollee2(key). (*Authentication*)
+event acceptEnrollee1(key). (*Authentication*)
+event termConfig1(key). (*Authentication*)
+event acceptEnrollee2(key). (*Authentication*)
+event termConfig2(key). (*Authentication*)
+
+
+event HasAccess(userid, channel).
+event CompromisedUser(userid).
+event CompromisedDevice(channel).
+event IntendToPair(userid, channel, channel).
+
+
+let User(uid:userid,ChannelC:channel,ChannelE:channel)=
+  event HasAccess(uid,ChannelC);
+  event HasAccess(uid,ChannelE);
+  event IntendToPair(uid, ChannelC, ChannelE);
+  in(ChannelE, (strhash:bitstring));
+  out(ChannelC, (strhash));
+  0.
+
+
+
+let Configurator(ChannelC:channel,hostC:host, skC:skey, sbI:eskey, spI:eskey, pbR:epkey,ppR:epkey)=
+in(ChannelC, (strhash:bitstring) );
+if strhash=sha256(concat(chirp,pbR)) then
+new Ni:nonce;
+new capi:bitstring;
+let M= ecDfHm(spI,pbR) in
+let k1= HKDF(first_ikey_const,M) in
+out(c, (H(pbR),H(epk(sbI)),epk(spI),senc((Ni,capi), k1) ));
+in(c, (dpp_status_e:bitstring,=H(pbR),=H(epk(sbI)),=ppR, enc_response:bitstring ));
+let N=ecDfHm(spI,ppR) in
+let k2= HKDF(second_ikey_const,N) in
+let (Nr:nonce,=Ni,capr:bitstring,enc_rauth:bitstring)=sdec(enc_response,k2) in
+let bk= HKDFextract(concatnonce(Ni,Nr),concatstr(M,N)) in
+let ke= HKDFextractkey(bk,dppkylen) in
+if HSH( concatstrs(Ni,Nr,epk(spI),ppR,pbR,cnst0) )=sdec(enc_rauth,ke) then
+let Iauth=HSH( concatstrs(Nr,Ni,ppR,epk(spI),pbR,cnst1) ) in
+new dpp_status_i:bitstring;
+event acceptConfigEnrolleeKey1(ke) ;(* configurated authenticate that he has Accepted the protocol run with employee1 with key ke*)
+out(c, (dpp_status_i,H(pbR),H(epk(sbI)), senc(Iauth,ke) ));
+in(c, (enc_config_request:bitstring));
+let (Ne:nonce,configAtrributes:bitstring)=sdec(enc_config_request,ke) in
+new dpp_config_status_i:bitstring;
+new configObject:bitstring;
+out(c, (dpp_config_status_i, senc( (Ne,configObject), ke)));
+in(c, (enc_config_result:bitstring));
+let (dpp_config_status_r:bitstring, =Ne)=sdec(enc_config_result,ke) in
+out(c,(senc(keScrt,ke)));
+event termConfig1(k1);
+0.
+
+
+
+
+let Enrollee(ChannelE:channel,hostE:host,skE:skey, sbR:eskey, spR:eskey, pbI:epkey, ppI:epkey) =
+
+out(ChannelE, (sha256(concat(chirp,epk(sbR)))) );
+in(c, (hshbr:bitstring,hshbi:bitstring, =ppI, enc_request:bitstring));
+if H(epk(sbR))=hshbr then
+if H(pbI)=hshbi then
+let Me= ecDfHm(sbR,ppI) in
+let ke1= HKDF(first_ikey_const,Me) in
+
+let (Ni:nonce,capi:bitstring)=sdec(enc_request,ke1) in
+
+new dpp_status_e:bitstring;
+let N=ecDfHm(spR,ppI) in
+let k2= HKDF(second_ikey_const,N) in
+new Nr:nonce;
+let bk= HKDFextract(concatnonce(Ni,Nr),concatstr(Me,N)) in
+let ke= HKDFextractkey(bk,dppkylen) in
+let Rauth=HSH( concatstrs(Ni,Nr,ppI,epk(spR),epk(sbR),cnst0) ) in
+new capr:bitstring;
+event acceptEnrollee1(ke1);(*here configur authentication*)
+out(c, (dpp_status_e,H(epk(sbR)),H(pbI),epk(spR), senc( (Nr,Ni,capr,senc(Rauth,ke)), k2) ));
+in(c, (dpp_status_i:bitstring,=H(epk(sbR)),=H(pbI), enc_iauth:bitstring) );
+let (iauth_hsh)=sdec(enc_iauth,ke) in
+if iauth_hsh=HSH(concatstrs(Nr,Ni,epk(spR),ppI,epk(sbR),cnst1)) then
+new Ne:nonce;
+
+new configAtrributes:bitstring;
+out(c, (senc( (Ne,configAtrributes), ke)));
+in(c, (dpp_config_status_i:bitstring, enc_config_response:bitstring ));
+let (Ne2:nonce,configObject:bitstring)=sdec(enc_config_response,ke) in
+if Ne2=Ne then
+new dpp_config_status_r:bitstring;
+out(c, (senc( (dpp_config_status_r, Ne), ke)));
+out(c,(senc(keempl1Scrt,ke1)));
+out(c,(encpt(configobjectScrt,configObject)));
+
+event termEnrollee1(ke);(*enrollee1 has terminated the protocol run with configurator with symmetric ket ke*)
+
+0.

@@ -1,0 +1,35 @@
+query attacker(keScrt). (*secrecy*)
+query attacker(ke2Scrt). (*secrecy*)
+query attacker(keempl1Scrt). (*secrecy*)
+query attacker(keempl2Scrt). (*secrecy*)
+
+
+query k:key; event (termEnrollee1(k))==>event (acceptConfigEnrolleeKey1(k)).
+query k:key; event (termEnrollee2(k))==>event (acceptConfigEnrolleeKey2(k)).
+query k:key; event (termConfig1(k))==>event (acceptEnrollee1(k)).
+query k:key; event (termConfig2(k))==>event (acceptEnrollee2(k)).
+
+
+
+process
+
+new skC:skey;
+new skE1:skey;
+new sbI:skey;
+new spI:skey;
+new sbR1:skey;
+new spR1:skey;
+new sbR2:skey;
+new spR2:skey;
+new skCA:skey;
+let pkCA = pk(skCA) in out(c,pkCA);
+let pkC = pk(skC) in out(c,pkC);
+let pkE1 = pk(skE1) in out(c,pkE1);
+let pbI = pk(sbI) in out(c,pbI);
+let ppI = pk(spI) in out(c,ppI);
+let pbR1 = pk(sbR1) in out(c,pbR1);
+let ppR1 = pk(spR1) in out(c,ppR1);
+let pbR2 = pk(sbR2) in out(c,pbR2);
+let ppR2 = pk(spR2) in out(c,ppR2);
+
+((Configurator(hostC,skC,pkCA,sbI,spI,pbR1,ppR1,pbR2,ppR2)) | (Enrollee1(hostE1,skE1,pkCA,sbR1,spR1,pbI,ppI)) | (Enrollee2(hostE2,pkCA,sbR2,spR2,pbI,ppI)) ) (*| (!procCA(skCA)) *)

@@ -1,0 +1,115 @@
+(*
+Protocol : Extensible Authentication Protocol - Transport Layer Security(EAP-TLS)
+EAP-TLS is IETF open standard. EAP-TLS is well known for network authentication
+security for 802.1x networks. In this protocol, both the authenticator and the
+device (referred as client or a supplicant) use X.509 certificates to authentic-
+ate each other. Protocol starts by, authenticator requesting the device for its
+identity. The device sends an EAP-response message with its identity. Once the
+authenticator receives the device's identity, it sends an EAP-request message
+indicating that the EAP-TLS exchange has started. The device declares its agree-
+ment by sending a client-hello message. Authenticator responds with a server-
+response message containing its TLS certificate. The device verifies the authen-
+ticator cetificate and shares master-secret & its TLS certficate (if requested)
+securely using authenticator's public key. Using which they establish a shared
+secret key for further communication. Similarly, the authenticator verifies the
+device's certificate. If everything checks out, the authenticator sends an EAP-
+success message.
+*)
+set traceDisplay=long.
+free c:channel.
+type nonce.
+type host.
+(* Symmetric key encryption *)
+type key.
+fun senc(bitstring, key): bitstring.
+reduc forall m: bitstring, k: key; sdec(senc(m,k),k) = m.
+(* Asymmetric key *)
+type skey.
+type pkey.
+fun pk(skey): pkey.
+fun aenc(bitstring, pkey): bitstring.
+reduc forall m: bitstring, sk: skey; adec(aenc(m,pk(sk)),sk) = m.
+(* Digital signatures *)
+type sskey.
+type spkey.
+fun spk(sskey): spkey.
+fun sign(bitstring, skey): bitstring.
+reduc forall m: bitstring, sk: skey; getmess(sign(m,sk)) = m.
+reduc forall m: bitstring, sk: skey; checksign(sign(m,sk),pk(sk)) = m.
+fun PRF(bitstring): key.
+reduc forall h:host,np:nonce,ns:nonce,ms:key;
+KeyGen(h,np,ns,ms)=PRF((h,ms,np,ns)).
+fun HSH(key,host,host,nonce,nonce,bitstring,bitstring): bitstring.
+fun H(key): bitstring.
+
+table keys(host,pkey).
+free hostS,hostP:host.
+const request_id:bitstring[data].
+const response_id:bitstring[data].
+const start_tls:bitstring[data].
+const Ccs:bitstring[data].
+const Shd:bitstring[data].
+const master_secret:bitstring[data].
+const secretclientK:bitstring [private].
+const secretserverK:bitstring [private].
+
+event acceptsS(key).
+event acceptsP(key,pkey).
+event termS(key,pkey).
+event termP(key).
+
+
+let peer(hostP:host, skP:skey, certP:bitstring, pkCA:pkey)=
+in(c,=request_id);
+out(c,response_id);
+in(c,=start_tls);
+new Np:nonce;
+new Version:bitstring;
+new CipherSuite:bitstring;
+new SessionID:bitstring;
+out(c,(hostP,Version,SessionID,Np,CipherSuite));
+in(c,(=Version,=SessionID,Ns:nonce,=CipherSuite,certS:bitstring,ServerKeyExchng:bitstring,=Shd));
+let (S:host,pkS:pkey)=checksign(certS,pkCA) in
+new PMS:bitstring;
+let MS = PRF((PMS, master_secret, Np, Ns)) in
+let ClientK=KeyGen(hostP, Np, Ns, MS)in
+if S=hostS then
+out(c,(certP,aenc(PMS,pkS),Ccs,senc(HSH(MS,hostP,hostS,Ns,Np,CipherSuite,SessionID),ClientK)));
+in(c,(=Ccs,encHMS_s:bitstring));
+let ServerK=KeyGen(S,Np,Ns,MS) in
+event acceptsP(MS,pkS);
+if HSH(MS,hostP,hostS,Ns,Np,CipherSuite,SessionID)=sdec(encHMS_s,ServerK) then
+event termP(MS);
+out(c, senc(secretclientK,ClientK));
+0.
+
+
+let server(hostS:host,skS:skey,certS:bitstring, pkCA:pkey) =
+out(c,request_id);
+in(c,=response_id);
+out(c,start_tls);
+in(c,(P:host,Version:bitstring,SessionID:bitstring,Np:nonce, CipherSuite:bitstring));
+if P=hostP then
+new Ns:nonce;
+new ServerKeyExchng:nonce;
+out(c,(Version,SessionID,Ns,CipherSuite,certS,ServerKeyExchng,Shd));
+in(c,(certP:bitstring,encPMS:bitstring,=Ccs,encHMS_c:bitstring));
+let (=P,pkP:pkey)=checksign(certP,pkCA) in
+let PMS=adec(encPMS,skS) in
+let MS=PRF((PMS,master_secret,Np,Ns)) in
+let ClientK=KeyGen(hostP,Np,Ns,MS) in
+if HSH(MS,hostP,hostS,Ns,Np,CipherSuite,SessionID)=sdec(encHMS_c,ClientK) then
+let ServerK=KeyGen(hostS,Np,Ns,MS) in
+event acceptsS(MS);
+out(c,(Ccs,senc(HSH(MS,hostP,hostS,Ns,Np,CipherSuite,SessionID),ServerK)));
+event termS(MS,pk(skS));
+out(c, senc(secretserverK,ServerK));
+0.
+
+
+
+
+let procCA(skCA:skey)=
+in(c,(h:host,k:pkey));
+get keys(=h , k ) in
+out(c, sign((h,k),skCA)).

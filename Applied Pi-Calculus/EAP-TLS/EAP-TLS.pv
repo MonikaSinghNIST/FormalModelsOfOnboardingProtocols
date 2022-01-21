@@ -1,0 +1,23 @@
+(*
+Protocol : Extensible Authentication Protocol - Transport Layer Security(EAP-TLS)
+*)
+query x:key; event(termP(x))==>event(acceptsS(x)).
+query x:key,y:pkey; event(termS(x,y))==>event(acceptsP(x,y)).
+query attacker(secretclientK).
+query attacker(secretserverK).
+
+
+process
+
+new skP:skey;
+new skS:skey;
+new skCA:skey;
+let pkCA = pk(skCA) in out(c,pkCA);
+let pkS = pk(skS) in out(c,pkS);
+let pkP = pk(skP) in out(c,pkP);
+let certS=sign((hostS,pkS),skCA) in
+insert keys(hostS, pkS);
+let certP=sign((hostP,pkP),skCA) in
+insert keys(hostP, pkP);
+
+((!peer(hostP,skP,certS,pkCA)) | (!server(hostS,skS,certS,pkCA)))

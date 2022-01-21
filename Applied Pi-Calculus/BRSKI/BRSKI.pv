@@ -1,0 +1,39 @@
+(*PROTOCOL*: Bootstrapping RemoteSecure Key Infrastructures (BRSKI)*)
+query attacker(ClientK_secr).(*S3 : TLS-session secrets*)
+query attacker(ServerK_secr).(*S3 : TLS-session secrets*)
+query attacker(ServerK_m_secr).(*S3 : TLS-session secrets*)
+query attacker(ClientK_m_secr).(*S3 : TLS-session secrets*)
+query attacker(Voucher_secr). (*S2 : Voucher Confidetiality*)
+query attacker(Idevid_secr).(*S1 : Secrecy of device Identity*)
+
+query x:pkey; event(pledgeComplete(x)). (*Reachability*)
+query x:pkey; event(registrarComplete(x)). (*Reachability*)
+query x:pkey; event(masaComplete(x)). (*Reachability*)
+
+query x:bitstring,y:pkey; inj-event(masaVocherTerms(x,y))==>inj-event(pledgeVocherAccept(x,y)).(*A5: Pledge authenticating voucherfrom MASA*)
+query x:bitstring,y:pkey; inj-event(masaVocherTerms(x,y))==>inj-event(registrarVocherAccept(x,y)).(*A3: Registrar authenticating voucherfrom MASA that it is coming from masa*)
+query x:bitstring,y:pkey; inj-event(masaVocherReqAccept(x,y))==>inj-event(registrarVocherReqTerms(x,y)).(*A2:MASA authenticating voucher Request from Registrar that it is coming from registrar*)
+query y:pkey; inj-event(pledgeIdevIDTerms(y))==>inj-event(masaIdevIDAccept(y)).(*A4: MASA authenticatig pledge on idevID*)
+query x:pkey; event(registrarTermsR(x))==>event(pledgeAcceptsR(x)). (*A1: Pledge authecates registrar*)
+query x:pkey; event(masaTermsM(x))==>event(registrarAcceptsM(x)). (*A3: registrar authecates masa*)
+
+
+
+
+process
+
+new skP:skey;
+new skR:skey;
+new skM:skey;
+new skCA:skey;
+let pkCA = pk(skCA) in out(c,pkCA);
+let pkR = pk(skR) in out(c,pkR);
+let pkP = pk(skP) in out(c,pkP);
+let pkM = pk(skM) in out(c,pkM);
+let certR=sign((hostR,pkR),skCA) in
+let iDevID=sign((Sn,Issuer,Sln,Aki,pkP),skM) in
+let certM=sign((hostM,pkM),skCA) in
+
+(*(!peer(hostP,skP,pkS,pkP,pkCA)) | (!server(hostS,skS,pkS,pkP,pkCA,certS)) | (!procCA(skCA))*)
+(*(!peer(hostP,certP,pkCA)) | (!server(hostS,skS,certS,pkCA)) | (!procCA(skCA))*)
+((!pledge(hostP,skP,pkCA,iDevID,pkM)) | (!registrar(hostR,skR,certR,pkM,pkCA)) | (!masa(hostS,skM,certM,iDevID,pkR,pkCA,pkP)) | (!procCA(skCA)))

@@ -1,0 +1,274 @@
+(*
+ PROTOCOL*: Bootstrapping RemoteSecure Key Infrastructures (BRSKI)
+ PURPOSE: (BRSKI) protocol provides a solution for a resource-constrained
+	     new device to automatically onboard the correct network in a secure manner.
+	     BRSKI specification refers the new device as 'pledge'.
+	     Protocol aims to establish a trusted relationship between pledge and the
+	     network operator/owner referred as 'registrar' in such a way so that
+	     they can assure and authenticate each other's identity. This is done using
+	     a singed 802.1AR iDevID cert which is installed into the device
+	     by the manufacturer during the manufacturing process. The iDevID cert indicates
+	     the manufacturer of the device, serial number of the device and type of the device.
+	     Manufacturer also installs a trust anchor of manufacturer's authorized signing authority
+	     (known as MASA) at compile time using which it can trust and verify the 'MASA'.
+
+
+
+ REFERENCE: https://tools.ietf.org/pdf/draft-ietf-anima-bootstrapping-keyinfra-41.pdf
+ MODELER:
+
+ ALICE_BOB:
+ \begin{verbatim}
+ Let P,R,M respectively represnts the pledge, registrar and MASA.
+ Kp,Kr,Km represents their public key and kca denotes the public key of certificate authority.
+
+
+ P --> R : P.Na.Sid.Pa		[Pledge_hello (Part of TLS handshake)]
+ R --> P : Nb.Sid.Pa.{R.Kr}_inv(Kca)	[Registrar_hello (Part of TLS handshake)]
+ P --> R : {Pms}_Kr.{Sn.Issuer.Sln.Aki.Kp}_inv(Km).{Finishedp}_ClientKp	[Pledge_key_exchange (Part of TLS handshake)]
+	  Mp : PRF(Pms.Na.Nb)
+	  Finishedp : PRF(Mp.P.R.Na.Pa.Sid)
+	  ClientKp  : KeyGen(P.Na.Nb.Mp)
+	  ServerKp  : KeyGen(R.Na.Nb.Mp)
+ R --> P : {Finishedp}_ServerKp	[Registrar_key_exchange (Part of TLS handshake)]
+ P --> R : {signed Pledge_voucher_request}_ClientKp
+	  Pledge_voucher_rquest : {Assr'.Np'.Sn.Crdate'.{R.Kr}_inv(Kca)}_(inv(Kp))
+ R --> M : R.Nc.Sidm.Pam		[Registrar_hello (Part of TLS handshake)]
+ M --> R : Nd.Sidm.Pam.{M.Km}_inv(Kca)	[MASA_hello (Part of TLS handshake)]
+	  Masa certificate ={M.Km}_inv(Kca)
+ R --> M : {Pmsm}_Kr.{R.Kr}_inv(Kca).{Finishedm}_ClientKm [Registrar_key_exchange (Part of TLS handshake)]
+	  Mm : PRF(Pmsm.Nc.Nd)
+	  Finishedm : PRF(Mm.R.M.Nc.Pam.Sidm)
+	  ClientKm  : KeyGen(R.Nc.Nd.Mm)
+	  ServerKm  : KeyGen(M.Nc.Nd.Mm)
+ M --> R : {Finishedm}_Serverm		[MASA_key_exchange (Part of TLS handshake)]
+ R --> M : {signed registrar_voucher_request}_ClientKm
+	  registrar_voucher_request = {Assr.Np.Sn.Rcrdate'.Issuer.Prior-signed pledge_voucher_request}
+ M --> R : {signed Voucher}_ServerKm
+	  voucher = {Assr.Np.Sn.{R.Kr}_inv(Kca)}
+ R --> P : {signed voucher}_ServerKp
+ \end{verbatim}
+ LIMITATIONS:
+\begin{itemize}
+ \item This formalisation is based on the abstracted version of BRSKI
+ presented by in https://tools.ietf.org/pdf/draft-ietf-anima-bootstrapping-keyinfra-41.pdf.
+ \item We do consider nonceless voucher request in this modelling.
+\end{itemize}
+ PROBLEMS: 3
+ ATTACKS: None
+ NOTES:
+ To initiate the bootstarping process, the pledge sends the iDevID as part of TLS session
+ and establish a provisional TLS connection through a joint proxy. Once the provisional
+ TLS connection is established pledge sends a signed voucher-request to the registrar
+ which includes the information about the pledge such as assertion(Assr), nonce(Np),
+ serial-number(Sn), created-on(Crdate), proximity-registrar-cert.
+ While receiving the pledge voucher-request registrar determines if it is
+ expecting such device if yes then it locates the device's MASA and sends MASA
+ a signed registrar voucher-request that contains the entire pledge voucher-request.
+ The registrar's voucher-request includes following information: assertion(Assr), nonce(Np),
+ serial-number(Sn), created-on(Crdate) from the pledge voucher-request, idevid-issuer(Issuer)
+ from the iDevID certificate and entire pledge voucher-request in prior-signed-voucher-request field.
+ Then MASA checks its record with respect to the provided device serial number in the voucher-request.
+ if the voucher-request is accepted, a voucher is issued. Voucher contains assertion(Assr),
+ nonce(Np), serial-number(Sn) and pinned-domain-cert. Registrar redeems the voucher by passing
+ it to the pledge. Pledge validates the signed voucher using the pre-installed \textit{MASA}'s trust anchor.
+ The pledge also verifies the registrar using the pinned-domain cert and completes the authentication of
+ provisional TLS connection. The pledge returns a voucher telemetry status indicating voucher acceptance status.
+
+
+
+*)
+
+set traceDisplay=long.
+free c:channel.
+
+type nonce.
+type host.
+(* Symmetric key encryption *)
+type key.
+fun senc(bitstring, key): bitstring.
+reduc forall m: bitstring, k: key; sdec(senc(m,k),k) = m.
+fun encpt(bitstring,bitstring): bitstring.
+(* Asymmetric key *)
+type skey.
+type pkey.
+fun pk(skey): pkey.
+fun aenc(bitstring, pkey): bitstring.
+reduc forall m: bitstring, sk: skey; adec(aenc(m,pk(sk)),sk) = m.
+(* Digital signatures *)
+type sskey.
+type spkey.
+fun spk(sskey): spkey.
+fun sign(bitstring, skey): bitstring.
+reduc forall m: bitstring, sk: skey; getmess(sign(m,sk)) = m.
+reduc forall m: bitstring, sk: skey; checksign(sign(m,sk),pk(sk)) = m.
+fun PRF(bitstring): key.
+reduc forall h:host,np:nonce,ns:nonce,ms:key;
+KeyGen(h,np,ns,ms)=PRF((h,ms,np,ns)).
+fun HSH(key,host,host,nonce,nonce,bitstring,bitstring): bitstring.
+fun H(key): bitstring.
+
+table keys(host,pkey).
+const Ccs:bitstring[data].
+const master_secret:bitstring[data].
+const Sln,Aki:bitstring[data].
+const ClientK_secr:bitstring [private].
+const ServerK_secr:bitstring [private].
+const ServerK_m_secr:bitstring [private].
+const ClientK_m_secr:bitstring [private].
+const Voucher_secr:bitstring [private].
+const Idevid_secr:bitstring [private].
+
+(*const SessionID:bitstring.*)
+free hostS,hostP,hostR,hostM:host.
+free Sn,Issuer:bitstring.
+
+(* Pledge completes registration with key K *)
+event pledgeAcceptsR(pkey).
+(* Registrar completes reconnect with key K *)
+event registrarTermsR(pkey).
+(* Peer completes registration with key K *)
+event registrarAcceptsM(pkey).
+(* MASA completes reconnect with key K *)
+event masaTermsM(pkey).
+
+
+event pledgeVocherAccept(bitstring,pkey).
+event masaVocherTerms(bitstring,pkey).
+event registrarVocherAccept(bitstring,pkey).
+event masaVocherReqAccept(bitstring,pkey).
+event registrarVocherReqTerms(bitstring,pkey).
+event masaIdevIDAccept(pkey).
+event pledgeIdevIDTerms(pkey).
+event masaComplete(pkey).
+event pledgeComplete(pkey).
+event registrarComplete(pkey).
+
+
+let pledge(hostP:host, skP:skey, pkCA:pkey, iDevID:bitstring, pkM:pkey)=
+new Na:nonce;
+new Sid:bitstring;
+new Pa:bitstring;
+out(c,(hostP,Na,Sid,Pa));
+in(c, (Nb:nonce,=Sid,=Pa,certR:bitstring));
+let (R:host,pkR:pkey)=checksign(certR,pkCA) in
+event pledgeAcceptsR(pkR);
+new PMS:bitstring;
+let MS = PRF((PMS, master_secret, Na, Nb)) in
+let ClientK = KeyGen(hostP, Na, Nb, MS) in
+if R=hostR then
+(*out(c,(aenc(PMS,pkS),Ccs,senc(HSH(MS,hostP,hostS,Ns,Np,CipherSuite,SessionID),ClientK)));*)
+out (c,(aenc(PMS,pkR),Ccs,senc(HSH(MS,hostP,hostR,Na,Nb,Pa,Sid),ClientK)));
+out (c,(iDevID));
+in(c,(=Ccs,encHMS_s:bitstring));
+let ServerK=KeyGen(R,Na,Nb,MS) in
+if HSH(MS,hostP,hostR,Na,Nb,Pa,Sid)=sdec(encHMS_s,ServerK) then
+new Assr:bitstring;
+new Crdate:bitstring;
+let VoucherReq=sign((Assr,Sn,Crdate,certR),skP) in
+out(c, (senc(VoucherReq,ClientK)));
+in(c, (enc_voucher:bitstring));
+let (Voucher:bitstring)=sdec(enc_voucher,ServerK) in
+let (M:host,=pkM)=checksign(Voucher,pkM) in
+if M=hostM then
+event pledgeVocherAccept(Voucher,pkM);
+let (VoucherP)=getmess(Voucher) in
+out (c, senc(ClientK_secr,ClientK));
+out (c, senc(ServerK_secr,ServerK));
+event pledgeIdevIDTerms(pk(skP));
+out (c, encpt(Voucher_secr,Voucher));
+out (c, encpt(Idevid_secr,iDevID));
+event pledgeComplete(pk(skP));
+0.
+
+
+let registrar(hostR:host,skR:skey,certR:bitstring,pkM:pkey,pkCA:pkey) =
+in(c, (P:host,Na:nonce,Sidx:bitstring,Pax:bitstring));
+new Nb:nonce;
+if P=hostP then
+out(c, (Nb,Sidx,Pax,certR));
+in(c,(encPMS:bitstring,=Ccs,encHMS_c:bitstring));
+let PMS=adec(encPMS,skR) in
+let MS=PRF((PMS,master_secret,Na,Nb)) in
+let ClientK=KeyGen(hostP,Na,Nb,MS) in
+if HSH(MS,hostP,hostR,Na,Nb,Pax,Sidx)=sdec(encHMS_c,ClientK) then
+let ServerK=KeyGen(hostR,Na,Nb,MS) in
+out(c,(Ccs,senc(HSH(MS,hostP,hostR,Na,Nb,Pax,Sidx),ServerK)));
+in(c, (iDevID:bitstring));
+let (=P,pkP:pkey)=checksign(iDevID,pkM) in
+in(c, (encVoucherReq:bitstring));
+if ClientK=KeyGen(hostP,Na,Nb,MS) then
+let VoucherReq=sdec(encVoucherReq,ClientK) in
+let (=P,=pkP)=checksign(VoucherReq,pkP) in
+let (Assr:bitstring,=Sn,Crdate:bitstring,=certR)=getmess(VoucherReq) in
+if P=hostP then
+(*Contact masa now*)
+new Nc:nonce;
+new Sidm:bitstring;
+new Pam:bitstring;
+out(c,(hostR,Nc,Sidm,Pam));
+in(c, (Nd:nonce,=Sidm,=Pam,certM:bitstring));
+let (M:host,=pkM)=checksign(certM,pkCA) in
+event pledgeAcceptsR(pkM);
+new PMSm:bitstring;
+let MSm = PRF((PMSm, master_secret, Nc, Nd)) in
+let ClientK_m=KeyGen(hostR, Nc, Nd, MSm)in
+if M=hostM then
+out (c,(aenc(PMSm,pkM),Ccs,senc(HSH(MSm,hostR,hostM,Nc,Nd,Pam,Sidm),ClientK_m)));
+in(c,(=Ccs,encHMS_r:bitstring));
+let ServerK_m=KeyGen(M,Nc,Nd,MSm) in
+if HSH(MSm,hostR,hostM,Nc,Nd,Pam,Sidm)=sdec(encHMS_r,ServerK_m) then
+out(c, (senc( (sign((Assr,Na,Sn,Crdate,Issuer,VoucherReq),skR),certR) ,ClientK_m )));
+in(c, (enc_voucher:bitstring));
+let (Voucher:bitstring)=sdec(enc_voucher,ServerK_m) in
+let (=M,=pkM)=checksign(Voucher,pkM) in
+if M=hostM then
+
+event registrarVocherReqTerms(VoucherReq,pk(skR));
+event registrarVocherAccept(Voucher,pkM);
+event registrarTermsR(pk(skR));
+out(c,(senc(Voucher,ServerK)));
+out (c, senc(ClientK_secr,ClientK));
+out (c, senc(ServerK_secr,ServerK));
+out (c, senc(ClientK_m_secr,ClientK_m));
+out (c, senc(ServerK_m_secr,ServerK_m));
+event registrarComplete(pk(skR));
+0.
+
+let masa(hostS:host,skM:skey,certM:bitstring,iDevID:bitstring,pkR:pkey,pkCA:pkey,pkP:pkey) =
+in(c, (R:host,Nc:nonce,Sidmx:bitstring,Pamx:bitstring));
+new Nd:nonce;
+if R=hostR then
+out(c, (Nd,Sidmx,Pamx,certM));
+in(c,(encPMSm:bitstring,=Ccs,encHMS_m:bitstring));
+let PMSm=adec(encPMSm,skM) in
+let MSm=PRF((PMSm,master_secret,Nc,Nd)) in
+let ClientK_m=KeyGen(hostR,Nc,Nd,MSm) in
+if HSH(MSm,hostR,hostM,Nc,Nd,Pamx,Sidmx)=sdec(encHMS_m,ClientK_m) then
+let ServerK_m=KeyGen(hostM,Nc,Nd,MSm) in
+out(c,(Ccs,senc(HSH(MSm,hostR,hostM,Nc,Nd,Pamx,Sidmx),ServerK_m)));
+in(c, (encVoucherReq_m:bitstring));
+if ClientK_m=KeyGen(hostR,Nc,Nd,MSm) then
+let (VoucherReq_msg:bitstring,certR:bitstring)=sdec(encVoucherReq_m,ClientK_m) in
+let (=R,=pkR)=checksign(certR,pkCA) in
+let (=R,=pkR)=checksign(VoucherReq_msg,pkR) in
+let (Assr:bitstring,=Nc,=Sn,Crdate:bitstring,=Issuer,VoucherReq:bitstring)=getmess(VoucherReq_msg) in
+let (=Assr,=Sn,=Crdate,=certR)=getmess(VoucherReq) in
+event masaVocherReqAccept(VoucherReq,pkR);
+if (Sn,Issuer,Sln,Aki,pkP)=getmess(iDevID) then
+event masaIdevIDAccept(pkP);
+let Voucher= sign((Assr,Nc,Sn,certR),skM) in
+event masaVocherTerms(Voucher,pk(skM));
+event masaTermsM(pk(skM));
+out(c,(senc(Voucher,ServerK_m)));
+out (c, senc(ClientK_m_secr,ClientK_m));
+out (c, senc(ServerK_m_secr,ServerK_m));
+event masaComplete(pk(skM));
+0.
+
+
+
+let procCA(skCA:skey)=
+in(c,(h:host,k:pkey));
+if h <> hostR then
+out(c, sign((h,k),skCA)).

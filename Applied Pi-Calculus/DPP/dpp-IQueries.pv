@@ -1,0 +1,29 @@
+query attacker(keScrt). (*S1, S2: secrecy*)
+query attacker(ke2Scrt). (*S1, S2: secrecy*)
+query attacker(keempl1Scrt). (*S1, S2: secrecy*)
+query attacker(keempl2Scrt). (*S1, S2: secrecy*)
+query attacker(configobjectScrt). (*S6: Confidentiality of Configuration object*)
+
+query k:key; event (termEnrollee1(k))==>event (acceptConfigEnrolleeKey1(k)).
+query k:key; event (termConfig1(k))==>event (acceptEnrollee1(k)).
+
+process
+new skC:skey;
+new skE:skey;
+new sbI:eskey;
+new spI:eskey;
+new sbR:eskey;
+new spR:eskey;
+new skCA:skey;
+let pkC = pk(skC) in out(c,pkC);
+let pkE = pk(skE) in out(c,pkE);
+let pbI = epk(sbI) in out(c,pbI);
+let ppI = epk(spI) in out(c,ppI);
+let pbR = epk(sbR) in out(c,pbR);
+let ppR = epk(spR) in out(c,ppR);
+
+
+((!User(uid,ChannelC,ChannelE))
+| (!Configurator(ChannelC,hostC,skC,sbI,spI,pbR,ppR))
+| (!Enrollee(ChannelE,hostE,skE,sbR,spR,pbI,ppI))
+  )
