@@ -1,0 +1,211 @@
+(*
+This is DPP misbidinding attack and prvention
+*)
+set preciseActions = true.
+set traceDisplay=long.
+free c:channel.
+(*************private channels***************)
+free ChannelC1:channel[private].
+free ChannelE1:channel[private].
+free ChannelC2:channel[private].
+free ChannelE2:channel[private].
+type nonce.
+type host.
+type userid.
+(* Symmetric key encryption *)
+type key.
+fun senc(bitstring, key): bitstring.
+reduc forall m: bitstring, k: key; sdec(senc(m,k),k) = m.
+
+(* Asymmetric key *)
+type skey.
+type pkey.
+fun pk(skey): pkey.
+fun aenc(bitstring, pkey): bitstring.
+reduc forall m: bitstring, sk: skey; adec(aenc(m,pk(sk)),sk) = m.
+
+(* Digital signatures *)
+type sskey.
+type spkey.
+fun spk(sskey): spkey.
+
+fun sign(bitstring, skey): bitstring.
+
+reduc forall m: bitstring, sk: skey; getmess(sign(m,sk)) = m.
+reduc forall m: bitstring, sk: skey; checksign(sign(m,sk),pk(sk)) = m.
+fun PRF(bitstring): key.
+reduc forall h:host,np:nonce,ns:nonce,ms:key;
+KeyGen(h,np,ns,ms)=PRF((h,ms,np,ns)).
+fun HSH(bitstring): bitstring.
+fun H(pkey): bitstring.
+(*New functions from here for DPP*)
+fun concat(bitstring, pkey): bitstring.
+fun concatstr(bitstring, bitstring): bitstring.
+fun concatstrs(nonce, nonce, pkey, pkey, pkey, bitstring): bitstring.
+fun concatnonce(nonce, nonce): bitstring.
+fun sha256(bitstring): bitstring.
+
+fun ecDfHm(skey,pkey):bitstring.
+reduc forall sb: skey, sp: skey ; ecDfHm2(sb,pk(sp))=ecDfHm(sp,pk(sb)) .
+fun HKDF(bitstring,bitstring): key.
+fun HKDFextract(bitstring,bitstring): bitstring.
+fun HKDFextractkey(bitstring,bitstring): key.
+
+const first_ikey_const:bitstring[data].
+const second_ikey_const:bitstring[data].
+const chirp:bitstring.
+const cnst0:bitstring.
+const cnst1:bitstring.
+const dppkylen:bitstring.
+const uid1:userid.
+const uid2:userid.
+
+const ClientK_secr:bitstring [private].
+const ServerK_secr:bitstring [private].
+const ServerK_m_secr:bitstring [private].
+const ClientK_m_secr:bitstring [private].
+(*const Voucher:bitstring [private]. *)
+
+
+
+free Sn,Issuer:bitstring.
+free keScrt,ke2Scrt,keempl1Scrt,keempl2Scrt,Rauth,Iauth:bitstring[private].
+
+
+event configuratorComplete(channel,key). (*Reachability*)
+event enrolleeComplete(channel,key). (*Reachability*)
+event acceptConfigEnrolleeKey(key). (*Authentication*)
+event termEnrollee(key). (*Authentication*)
+event acceptEnrollee(key). (*Authentication*)
+event termConfig(key). (*Authentication*)
+event acceptEnrollee2(key). (*Authentication*)
+event termConfig2(key). (*Authentication*)
+
+
+event HasAccess(userid, channel).
+event CompromisedUser(userid).
+event CompromisedDevice(channel).
+event IntendToPair(userid, channel, channel).
+
+query ChannelConf:channel, ChannelEnrl:channel, K:key, usrd:userid;
+    (event(HasAccess(usrd,ChannelConf)) &&
+     event(configuratorComplete(ChannelConf, K)) &&
+     event(enrolleeComplete(ChannelEnrl, K)))
+        ==> (event(IntendToPair(usrd, ChannelConf, ChannelEnrl)) ||
+             event(CompromisedUser(usrd)) ||
+            (event(CompromisedDevice(ChannelConf)) &&
+             event(CompromisedDevice(ChannelEnrl)))).
+
+
+let User(Uid:userid,ChannelC:channel,ChannelE:channel)=
+( event HasAccess(Uid,ChannelC);
+  event HasAccess(Uid,ChannelE);
+  event IntendToPair(Uid, ChannelC, ChannelE);
+  in(ChannelE, (pbR:pkey,certTemp:bitstring));
+  out(ChannelC, (pbR,certTemp));
+  0
+  ) |
+( event CompromisedUser(Uid);
+  out(c, ChannelC);
+  out(c, ChannelE) )
+.
+
+
+
+let Configurator(ChannelC:channel,pkCA:pkey)=
+(
+  new sbI:skey;
+  new spI:skey;
+  let pbI = pk(sbI) in
+  let ppI = pk(spI) in
+
+  in(ChannelC, (pbR:pkey,certTemp:bitstring) );
+  let (hostE:host,=pbR)=checksign(certTemp,pkCA) in
+new Ni:nonce;
+new capi:bitstring;
+let M= ecDfHm(spI,pbR) in
+let k1= HKDF(first_ikey_const,M) in
+out(c, (H(pbR),H(pk(sbI)),pk(spI),senc((Ni,capi), k1) ));
+in(c, (dpp_status_e:bitstring,=H(pbR),=H(pk(sbI)),ppR:pkey, enc_response:bitstring ));
+let N=ecDfHm2(spI,ppR) in
+let k2= HKDF(second_ikey_const,N) in
+let (Nr:nonce,=Ni,capr:bitstring,enc_rauth:bitstring)=sdec(enc_response,k2) in
+let bk= HKDFextract(concatnonce(Ni,Nr),concatstr(M,N)) in
+let ke= HKDFextractkey(bk,dppkylen) in
+if HSH( concatstrs(Ni,Nr,ppI,ppR,pbR,cnst0) )=sdec(enc_rauth,ke) then
+let Iauth=HSH( concatstrs(Nr,Ni,ppR,ppI,pbR,cnst1) ) in
+new dpp_status_i:bitstring;
+event acceptConfigEnrolleeKey(ke) ;
+out(c, (dpp_status_i,H(pbR),H(pbI), senc(Iauth,ke) ));
+in(c, (enc_config_request:bitstring));
+let (Ne:nonce,configAtrributes:bitstring)=sdec(enc_config_request,ke) in
+new dpp_config_status_i:bitstring;
+new configObject:bitstring;
+out(c, (dpp_config_status_i, senc( (Ne,configObject), ke)));
+event configuratorComplete(ChannelC,ke);
+event termConfig(ke);
+0) | (
+  event CompromisedDevice(ChannelC);
+  out(c, ChannelC)
+).
+
+
+let Enrollee(ChannelE:channel,certR:bitstring,sbR:skey,pbR:pkey) =
+(
+  new spR:skey;
+  let ppR = pk(spR) in
+  out(ChannelE, (pbR,certR) );
+in(c, (hshbr:bitstring,hshbi:bitstring, ppI:pkey, enc_request:bitstring));
+if H(pk(sbR))=hshbr then
+let Me= ecDfHm2(sbR,ppI) in
+let ke1= HKDF(first_ikey_const,Me) in
+let (Ni:nonce,capi:bitstring)=sdec(enc_request,ke1) in
+new dpp_status_e:bitstring;
+let N=ecDfHm(spR,ppI) in
+let k2= HKDF(second_ikey_const,N) in
+new Nr:nonce;
+let bk= HKDFextract(concatnonce(Ni,Nr),concatstr(Me,N)) in
+let ke= HKDFextractkey(bk,dppkylen) in
+let Rauth=HSH( concatstrs(Ni,Nr,ppI,ppR,pbR,cnst0) ) in
+new capr:bitstring;
+event acceptEnrollee(ke1);
+out(c, (dpp_status_e,H(pbR),hshbi,ppR, senc( (Nr,Ni,capr,senc(Rauth,ke)), k2) ));
+in(c, (dpp_status_i:bitstring,=H(pbR),=hshbi, enc_iauth:bitstring) );
+let (iauth_hsh)=sdec(enc_iauth,ke) in
+if iauth_hsh=HSH(concatstrs(Nr,Ni,ppR,ppI,pbR,cnst1)) then
+new Ne:nonce;
+new configAtrributes:bitstring;
+out(c, (senc( (Ne,configAtrributes), ke)));
+
+in(c, (dpp_config_status_i:bitstring, enc_config_response:bitstring ));
+let (Ne2:nonce,configObject:bitstring)=sdec(enc_config_response,ke) in
+if Ne2=Ne then
+event termEnrollee(ke);
+event enrolleeComplete(ChannelE,ke);
+0) | (
+  event CompromisedDevice(ChannelE);
+  out(c, ChannelE)
+).
+
+
+
+process
+
+new hostR1:host;
+new hostR2:host;
+new skCA:skey;
+let pkCA = pk(skCA) in out(c,pkCA);
+
+new sbR1:skey;
+let pbR1 = pk(sbR1) in
+let certR1=sign((hostR1,pbR1),skCA) in
+new sbR2:skey;
+let pbR2 = pk(sbR2) in
+let certR2=sign((hostR2,pbR2),skCA) in
+
+((User(uid1,ChannelC1,ChannelE1))
+|(User(uid2,ChannelC2,ChannelE2))
+| (Configurator(ChannelC1,pkCA))
+| (Configurator(ChannelC2,pkCA))
+| (Enrollee(ChannelE1,certR1,sbR1,pbR1))
+| (Enrollee(ChannelE2,certR2,sbR2,pbR1))  )
