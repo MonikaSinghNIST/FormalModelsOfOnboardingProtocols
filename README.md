@@ -1,6 +1,6 @@
 # FormalModelsOfOnboardingProtocols
 
-This presents the formal model of BRSKI, DPP, and EAP-TLS in HLPSL and applied pi-calculus
+This repository presents the formal model of BRSKI, DPP, and EAP-TLS in HLPSL and applied pi-calculus
 
 In this work, we use two automated symbolic protocol verification tools, ProVerif and Automated Validation of Internet Security Protocols and Applications (AVISPA) tool to formally verify the security property of prominent IoT secure device onboarding protocols. These tools analyze the protocols to find the attacks from the point of view of a network adversary. Formal verification tools have already been used to analyse many prominent protocols like TlS, SSH, IKE, OAuth, etc. Over time they are becoming an effective way of finding vulnerabilities of the protocol constructions.
 Proverif was developed by Bruno Blanchet in 2001. Proverif is a cryptographic protocol verification tool that facilitates protocol analysis for an unbounded number of sessions by using over-approximation. ProVerif uses applied pi-calculus to formally model a protocol and automatically verifies the security properties of the formal model. AVISPA was developed by Armando et.al. in the year 2005.
